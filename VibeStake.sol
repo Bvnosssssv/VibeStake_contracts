@@ -196,7 +196,7 @@ contract VibeStake {
         for (uint256 i = 0; i < donationListenerRecord[_demoID].length; i++) {
             if (donationListenerRecord[_demoID][i].listenerAddress == msg.sender) {
                 donationListenerRecord[_demoID][i].listenerAddress.transfer(donationListenerRecord[_demoID][i].donationAmount);
-                delete donationListenerRecord[_demoID][i];
+                delete donationListenerRecord[_demoID][i];   
             }
         }
     }
@@ -319,11 +319,7 @@ contract VibeStake {
         // transfer the purchase amount to the artist
         allSongs[_songID].artistAddress.transfer(artistShare);
 
-        // calculate total donation amount from listeners
-        uint256 totalDonationAmount = 0;
-        for (uint256 i = 0; i < donationListenerRecord[_songID].length; i++) {
-            totalDonationAmount += donationListenerRecord[_songID][i].donationAmount;
-        }
+
         // transfer the listener share to the listener according to their donation amount
         for (uint256 i = 0; i < allSongs[_songID].stakeInfo.length; i++) {
             uint256 listenerShareAmount = listenerShare * allSongs[_songID].stakeInfo[i].StakeProportion / 100;
