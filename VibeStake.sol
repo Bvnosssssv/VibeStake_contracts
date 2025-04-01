@@ -45,7 +45,7 @@ contract VibeStake {
         string artistName;
         uint256 artistID;
         string genre;
-        string hash;
+        // string hash;
         uint256 demoID;
         uint256 DonationDays;
         string ipfsHash; // IPFS address for storing demo
@@ -56,11 +56,12 @@ contract VibeStake {
         string artistName;
         uint256 artistID;
         string genre;
-        string hash;
+        // string hash;
         uint256 songID;
         address payable artistAddress;
         uint256 [] platformAuthorized; // platformID // to check the logic
         string ipfsHash; // IPFS address for storing song
+        uint256 price; // price for the song / per day, unit is wei(1 ether = 10^18 wei) // to check the logic
     }
 
     struct Donation {
@@ -93,23 +94,24 @@ contract VibeStake {
 
     function registerArtist(string memory _name) public {
         require(identifyUser[msg.sender] == UserType.UNDEFINED, "User already registered.");
+
+        artistIDTracker++;
         identifyUser[msg.sender] = UserType.ARTIST;
         allArtists[msg.sender] = Artist(_name, artistIDTracker, payable(msg.sender));
-        artistIDTracker++;
     }
 
     function registerListener(string memory _name) public {
         require(identifyUser[msg.sender] == UserType.UNDEFINED, "User already registered.");
+        listenerIDTracker++;
         identifyUser[msg.sender] = UserType.LISTENER;
         allListeners[msg.sender] = Listener(_name, listenerIDTracker);
-        listenerIDTracker++;
     }
 
     function registerPlatform(string memory _name) public {
         require(identifyUser[msg.sender] == UserType.UNDEFINED, "User already registered.");
+        platformIDTracker++;
         identifyUser[msg.sender] = UserType.PLATFORM;
         allPlatforms[msg.sender] = Platform(_name, platformIDTracker);
-        platformIDTracker++;
     }
 
     // create demo
@@ -123,26 +125,24 @@ contract VibeStake {
     function addDemo(
         string memory _demoname,
         string memory _genre,
-        string memory _hash,
         uint256 _donationdays,
         string memory _ipfshash) public {
         require(identifyUser[msg.sender] == UserType.ARTIST, "Not an artist.");
-        require(!musicHashUsed[_hash], "Duplicate hash has been detected.");
-        demoIDTracker += 1;
+        require(!musicHashUsed[_ipfshash], "Duplicate hash has been detected.");
         
+        demoIDTracker += 1;
         Demo memory newDemo;
         newDemo.demoName = _demoname;
         newDemo.artistName = allArtists[msg.sender].artistname;
         newDemo.artistID = allArtists[msg.sender].artistID;
         newDemo.genre = _genre;
-        newDemo.hash = _hash;
         newDemo.demoID = demoIDTracker;
         newDemo.artistName = allArtists[msg.sender].artistname;
         newDemo.DonationDays = _donationdays;
         newDemo.ipfsHash = _ipfshash;
         allDemos[demoIDTracker] = newDemo;
         
-        musicHashUsed[_hash] = true;
+        musicHashUsed[_ipfshash] = true;
         artistToDemos[allArtists[msg.sender].artistID].push(demoIDTracker);
         emit demoAdded(
             demoIDTracker,
@@ -151,86 +151,176 @@ contract VibeStake {
             _donationdays,
             _ipfshash
         );
-        demoIDTracker++;
     }
 
-    // create song and remove demo
+    // donate the demo and send the donation to the contract temporarily
+    // the contract will hold the donation until the song is published
+    event demoDonation(
+        uint256 demoID,
+        uint256 donationAmount,
+        address listenerAddress);
+    function donateDemoListener(uint256 _demoID) public payable {
+        require(identifyUser[msg.sender] == UserType.LISTENER, "Not a listener.");
+        require(allDemos[_demoID].demoID != 0, "Demo does not exist.");
+        require(msg.value > 0, "Donation amount must be greater than 0.");
+
+        Donation memory newDonation;
+        newDonation.DemoID = _demoID;
+        newDonation.donationAmount = msg.value;
+        newDonation.listenerAddress = payable(msg.sender);
+        
+        donationListenerRecord[_demoID].push(newDonation);
+
+        emit demoDonation(
+            _demoID,
+            msg.value,
+            msg.sender
+        );
+    }
+
+    // create song, remove demo and distribute the donation to the artist
     event songAdded(
         uint256 songID,
         string songName,
         string artistName,
         string genre,
-        string hash,
         address artistAddress,
         string ipfsHash);
 
     function addSong(
         string memory _songName,
         string memory _genre,
-        string memory _hash,
         uint256 _demoID,
         string memory _ipfshash
         ) public {
         require(identifyUser[msg.sender] == UserType.ARTIST, "Not an artist.");
         require(allDemos[_demoID].demoID != 0, "Demo does not exist.");
-        require(!musicHashUsed[_hash], "Duplicate hash has been detected.");
+        require(!musicHashUsed[_ipfshash], "Duplicate hash has been detected.");
         require(allDemos[_demoID].artistID == allArtists[msg.sender].artistID, "Not the owner of the demo.");
+
+        songIDTracker += 1;
 
         Song memory newSong;
         newSong.songName = _songName;
         newSong.artistName = allArtists[msg.sender].artistname;
         newSong.artistID = allArtists[msg.sender].artistID;
         newSong.genre = _genre;
-        newSong.hash = _hash;
         newSong.songID = songIDTracker;
         newSong.artistAddress = allArtists[msg.sender].artistAddress;
         newSong.platformAuthorized = new uint256[](0);
         newSong.ipfsHash = _ipfshash;
+        newSong.price = 0; // default price is 0, the artist can set the price later
         allSongs[songIDTracker] = newSong;
 
-        musicHashUsed[_hash] = true;
+        musicHashUsed[_ipfshash] = true;
         artistToSongs[allArtists[msg.sender].artistID].push(songIDTracker);
+        timesSongPublished[songIDTracker] = block.timestamp;
 
-        songIDTracker += 1;
 
         // Remove the demo
         delete allDemos[_demoID];
-        musicHashUsed[allDemos[_demoID].hash] = false;
+        musicHashUsed[allDemos[_demoID].ipfsHash] = false;
+
+        // Get the donation amount
+        uint256 donationAmount = 0;
+        for (uint256 i = 0; i < donationListenerRecord[_demoID].length; i++) {
+            donationAmount += donationListenerRecord[_demoID][i].donationAmount;
+        }
+        // Distribute the donation to the artist
+        allArtists[msg.sender].artistAddress.transfer(donationAmount);
+
 
         emit songAdded(
             songIDTracker,
             _songName,
             allArtists[msg.sender].artistname,
             _genre,
-            _hash,
             allArtists[msg.sender].artistAddress,
             _ipfshash
         );
         }
-    
-
-    // donate the demo
-    event demoDonated(
-        uint256 demoID,
-        uint256 donationAmount,
-        address listenerAddress);
-    function donateDemo(uint256 _demoID) public payable {}
-
-    // distribute the return from songs to the listeners
-    event ReturnsDistributed(
+    // set the price for the song
+    event songPriceSet(
         uint256 songID,
-        uint256 donationAmount,
-        address listenerAddress);
-    function distributeReturns(uint256 _songID) public payable {}
+        uint256 price);
+    function setSongPrice(
+        uint256 _songID,
+        uint256 _price) public {
+        require(identifyUser[msg.sender] == UserType.ARTIST, "Not an artist.");
+        require(allSongs[_songID].songID != 0, "Song does not exist.");
+        require(allSongs[_songID].artistAddress == msg.sender, "Not the owner of the song.");
+        allSongs[_songID].price = _price;
+
+        emit songPriceSet(
+            _songID,
+            _price
+        );
+    }
     
 
-    // authorize platform
-    event platformAuthorized(
+    // platform purchase the right to publish the song for certain days
+    event platformPurchase(
+        uint256 songID,
+        string songName,
+        string artistName,
+        uint256 platformID,
+        string platformName,
+        uint256 purchaseAmount,
+        uint256 purchaseDays);
+
+    function purchaseSong(
+        uint256 _songID,
+        uint256 _platformID,
+        uint256 _purchaseAmount,
+        uint256 _purchaseDays) public {
+        require(identifyUser[msg.sender] == UserType.PLATFORM, "Not a platform.");
+        require(allSongs[_songID].songID != 0, "Song does not exist.");
+        require(allPlatforms[msg.sender].platformID == _platformID, "Not the owner of the platform.");
+        require(_purchaseAmount > allSongs[_songID].price * _purchaseDays, "Purchase amount must be greater than the price.");
+        require(_purchaseDays > 0, "Purchase days must be greater than 0.");
+
+        // calculate the shares owned by the listener, and the default is 90% to the artist and 10% to the listener
+        uint256 artistShare = _purchaseAmount * 90 / 100;
+        uint256 listenerShare = _purchaseAmount * 10 / 100;
+        // transfer the purchase amount to the artist
+        allSongs[_songID].artistAddress.transfer(artistShare);
+
+        // calculate total donation amount from listeners
+        uint256 totalDonationAmount = 0;
+        for (uint256 i = 0; i < donationListenerRecord[_songID].length; i++) {
+            totalDonationAmount += donationListenerRecord[_songID][i].donationAmount;
+        }
+        // transfer the listener share to the listener according to their donation amount
+        for (uint256 i = 0; i < donationListenerRecord[_songID].length; i++) {
+            donationListenerRecord[_songID][i].listenerAddress.transfer(donationListenerRecord[_songID][i].donationAmount * listenerShare / totalDonationAmount);
+        }
+        
+        
+        emit platformPurchase(
+            _songID,
+            allSongs[_songID].songName,
+            allSongs[_songID].artistName,
+            allPlatforms[msg.sender].platformID,
+            allPlatforms[msg.sender].name,
+            _purchaseAmount,
+            _purchaseDays
+        );
+        // add the song to the platform
+        platformToSongs[_platformID].push(_songID);
+        // add the platform to the song
+        allSongs[_songID].platformAuthorized.push(_platformID);
+        
+        
+    }
+
+    // unauthorize the platform to publish the song after expiration
+    event platformUnauthorized(
         uint256 songID,
         string songName,
         string artistName,
         uint256 platformID,
         string platformName);
+    function unAuthorizePlatform()
 
-    function authorizePlatform() {}
+    
 }
