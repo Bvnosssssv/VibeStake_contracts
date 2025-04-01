@@ -93,6 +93,7 @@ contract VibeStake {
 
     // extra mappings for intellectual property protection
     mapping(uint256 => uint256) timesSongPublished;
+    mapping(uint256 => uint256) timesDemoPublished;
     
     function getUserType(address _user) public view returns (UserType) {
         return identifyUser[_user];
@@ -150,6 +151,7 @@ contract VibeStake {
         
         musicHashUsed[_ipfshash] = true;
         artistToDemos[allArtists[msg.sender].artistID].push(demoIDTracker);
+        timesDemoPublished[demoIDTracker] = block.timestamp;
         emit demoAdded(
             demoIDTracker,
             _demoname,
@@ -182,6 +184,21 @@ contract VibeStake {
             msg.value,
             msg.sender
         );
+    }
+
+    // return money to the listener if the song is not published after the donation days
+    // but the function can only be called after the donation days and should be called by the listener
+    function returnDonation(uint256 _demoID) public {
+        require(identifyUser[msg.sender] == UserType.LISTENER, "Not a listener.");
+        require(allDemos[_demoID].demoID != 0, "Demo does not exist."); // if song published, the demo will be deleted
+        require(block.timestamp > timesDemoPublished[_demoID] + allDemos[_demoID].DonationDays * 1 days, "The song has been published.");
+
+        for (uint256 i = 0; i < donationListenerRecord[_demoID].length; i++) {
+            if (donationListenerRecord[_demoID][i].listenerAddress == msg.sender) {
+                donationListenerRecord[_demoID][i].listenerAddress.transfer(donationListenerRecord[_demoID][i].donationAmount);
+                delete donationListenerRecord[_demoID][i];
+            }
+        }
     }
 
     // create song, remove demo and distribute the donation to the artist
