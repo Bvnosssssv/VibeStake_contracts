@@ -9,7 +9,8 @@ contract VibeStake {
     uint256 demoIDTracker;
     uint256 songIDTracker;
 
-    constructor(address _userManager) {
+    constructor() {
+        // Initialize the ID trackers
         artistIDTracker = 0;
         listenerIDTracker = 0;
         platformIDTracker = 0;
@@ -62,11 +63,16 @@ contract VibeStake {
         uint256 [] platformAuthorized; // platformID // to check the logic
         string ipfsHash; // IPFS address for storing song
         uint256 price; // price for the song / per day, unit is wei(1 ether = 10^18 wei) // to check the logic
+        StakeInfo[] stakeInfo; // to check the logic
     }
 
     struct Donation {
         uint256 DemoID;
         uint256 donationAmount;
+        address payable listenerAddress;
+    }
+    struct StakeInfo{
+        uint256 StakeProportion; // 0-100
         address payable listenerAddress;
     }
 
@@ -210,7 +216,6 @@ contract VibeStake {
         newSong.platformAuthorized = new uint256[](0);
         newSong.ipfsHash = _ipfshash;
         newSong.price = 0; // default price is 0, the artist can set the price later
-        allSongs[songIDTracker] = newSong;
 
         musicHashUsed[_ipfshash] = true;
         artistToSongs[allArtists[msg.sender].artistID].push(songIDTracker);
@@ -222,12 +227,24 @@ contract VibeStake {
         musicHashUsed[allDemos[_demoID].ipfsHash] = false;
 
         // Get the donation amount
-        uint256 donationAmount = 0;
+        uint256 totaldonationAmount = 0;
         for (uint256 i = 0; i < donationListenerRecord[_demoID].length; i++) {
-            donationAmount += donationListenerRecord[_demoID][i].donationAmount;
+            totaldonationAmount += donationListenerRecord[_demoID][i].donationAmount;
         }
+        
+        // Record the info of the listeners who donated to the song 
+        newSong.stakeInfo = new StakeInfo[](donationListenerRecord[_demoID].length);
+        for (uint256 i = 0; i < donationListenerRecord[_demoID].length; i++) {
+            newSong.stakeInfo[i] = StakeInfo({
+                StakeProportion: donationListenerRecord[_demoID][i].donationAmount * 100 / totaldonationAmount,
+                listenerAddress: donationListenerRecord[_demoID][i].listenerAddress
+            });
+        }
+        delete donationListenerRecord[_demoID]; // clear the donation record for the demo
+        allSongs[songIDTracker] = newSong;
+
         // Distribute the donation to the artist
-        allArtists[msg.sender].artistAddress.transfer(donationAmount);
+        allArtists[msg.sender].artistAddress.transfer(totaldonationAmount);
 
 
         emit songAdded(
@@ -291,8 +308,9 @@ contract VibeStake {
             totalDonationAmount += donationListenerRecord[_songID][i].donationAmount;
         }
         // transfer the listener share to the listener according to their donation amount
-        for (uint256 i = 0; i < donationListenerRecord[_songID].length; i++) {
-            donationListenerRecord[_songID][i].listenerAddress.transfer(donationListenerRecord[_songID][i].donationAmount * listenerShare / totalDonationAmount);
+        for (uint256 i = 0; i < allSongs[_songID].stakeInfo.length; i++) {
+            uint256 listenerShareAmount = listenerShare * allSongs[_songID].stakeInfo[i].StakeProportion / 100;
+            allSongs[_songID].stakeInfo[i].listenerAddress.transfer(listenerShareAmount);
         }
         
         
@@ -313,14 +331,14 @@ contract VibeStake {
         
     }
 
-    // unauthorize the platform to publish the song after expiration
-    event platformUnauthorized(
-        uint256 songID,
-        string songName,
-        string artistName,
-        uint256 platformID,
-        string platformName);
-    function unAuthorizePlatform()
+    // // unauthorize the platform to publish the song after expiration
+    // event platformUnauthorized(
+    //     uint256 songID,
+    //     string songName,
+    //     string artistName,
+    //     uint256 platformID,
+    //     string platformName);
+    // function unAuthorizePlatform(){}
 
     
 }
