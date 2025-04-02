@@ -1,0 +1,125 @@
+// 定义页面主色调和字体
+$primary-color: #2c3e50;
+$secondary-color: #ecf0f1;
+$accent-color: #e74c3c;
+$font-family-base: 'Roboto', sans-serif;
+
+#artist {
+  background: linear-gradient(135deg, $secondary-color 0%, #fff 100%);
+  min-height: 100vh;
+  font-family: $font-family-base;
+  color: $primary-color;
+  padding-bottom: 30px;
+
+  .artist-header {
+    background: $primary-color;
+    color: $secondary-color;
+    padding: 20px;
+    border-bottom: 5px solid $accent-color;
+    h1 {
+      margin-bottom: 0;
+      font-size: 2.5rem;
+    }
+    p {
+      margin: 0;
+      font-size: 1.2rem;
+    }
+  }
+
+  .artist-content {
+    margin-top: 30px;
+    .search-bar {
+      input {
+        border-radius: 50px;
+        border: 2px solid $primary-color;
+        padding: 10px 20px;
+        font-size: 1rem;
+        &:focus {
+          outline: none;
+          box-shadow: 0 0 10px rgba($accent-color, 0.5);
+        }
+      }
+    }
+
+    .songs-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      justify-content: center;
+      margin-bottom: 30px;
+
+      .song-card {
+        background: rgba(255, 255, 255, 0.8);
+        border: 1px solid rgba($primary-color, 0.2);
+        border-radius: 10px;
+        box-shadow: 0 4px 8px rgba($primary-color, 0.1);
+        width: 300px;
+        transition: transform 0.3s ease;
+        &:hover {
+          transform: translateY(-5px);
+        }
+        .song-card-header {
+          background: $accent-color;
+          color: #fff;
+          border-top-left-radius: 10px;
+          border-top-right-radius: 10px;
+          padding: 10px;
+          h3 {
+            margin: 0;
+            font-size: 1.5rem;
+          }
+        }
+        .song-card-body {
+          padding: 15px;
+          p {
+            margin: 5px 0;
+            font-size: 0.9rem;
+          }
+          .btn-play {
+            background: $primary-color;
+            color: $secondary-color;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 50px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.3s ease;
+            &:hover {
+              background: darken($primary-color, 10%);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  .artist-footer {
+    background: $primary-color;
+    color: $secondary-color;
+    position: relative;
+    bottom: 0;
+    width: 100%;
+    p {
+      margin: 0;
+      font-size: 0.9rem;
+    }
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    .btn-demos {
+      background: #2c3e50;
+      color: #ecf0f1;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 5px;
+      margin-right: 20px;
+      text-decoration: none;
+      &:hover {
+        background: darken(#2c3e50, 10%);
+        color: #fff;
+      }
+    }
+  }
+}
