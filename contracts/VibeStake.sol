@@ -224,7 +224,7 @@ contract VibeStake {
         uint256 demoID,
         uint256 donationAmount,
         address listenerAddress);
-    function donateDemoListener(uint256 _demoID) public payable {
+    function donateToDemo(uint256 _demoID) public payable {
         require(identifyUser[msg.sender] == UserType.LISTENER, "Not a listener.");
         require(allDemos[_demoID].demoID != 0, "Demo does not exist.");
         require(msg.value > 0, "Donation amount must be greater than 0.");
@@ -244,7 +244,7 @@ contract VibeStake {
             msg.sender
         );
     }
-
+    
     // return money to the listener if the song is not published after the donation days
     // but the function can only be called after the donation days and should be called by the listener
     function returnDonation(uint256 _demoID) public {
@@ -267,9 +267,17 @@ contract VibeStake {
 // if passed, the song will be added and the donation will be distributed to the artist
 // if not passed, the donation will be returned to the listener and the demo will not be deleted, 
 // and there will no be any stakeinfo for the song
-
+    
+    event SongSubmitted(
+        uint256 demoID,
+        uint256 semiSongID,
+        string artistName,
+        string songName,
+        string genre,
+        string ipfshash
+    );
     // if donation amount is 0, the song do not need to be voted so that it can skip this process
-    function addSongBeforeVoting(
+    function SongSubmittedForVoting(
         uint256 _demoID,
         string memory _songName,
         string memory _genre,
@@ -308,19 +316,32 @@ contract VibeStake {
         Voting storage newVoting = allVoting[semiSongIDTracker];
         newVoting.demoID = _demoID;
         newVoting.votingEndTime = block.timestamp + 7 days;  // Set voting duration
-        totalDonationAmount = 0;
+        uint256 totalDonationAmount = 0;
         
         for (uint256 i = 0; i < donationListenerRecord[_demoID].length; i++) {
             totalDonationAmount += donationListenerRecord[_demoID][i].donationAmount;
         }
         newVoting.totalDonationAmount = totalDonationAmount;
-        
-        emit songAddedBeforeVoting(semiSongIDTracker, _songName, _ipfshash);
+
+        emit SongSubmitted(
+            _demoID,
+            semiSongIDTracker,
+            allArtists[msg.sender].artistname,
+            _songName,
+            _genre,
+            _ipfshash
+        );
         
     }
     
-    // Event for song voting result
-    event songVotingResult(uint256 semisongID, bool isApproved, uint256 votePercentage);
+
+    event songVotingUpdate(
+        uint256 semisongID,
+        string songName,
+        string artistName,
+        uint256 demoID,
+        uint256 VoteAmount,
+        uint256 totalVotePercentage);
 
     // Function to vote on a song
     function voteOnSong(uint256 _semisongID) public {
@@ -329,7 +350,7 @@ contract VibeStake {
         require(allVoting[_semisongID].votingEndTime > block.timestamp, "Voting has ended.");
         require(!allVoting[_semisongID].hasVoted[msg.sender], "You have already voted.");
         require(donationListenerRecord[allVoting[_semisongID].demoID].length > 0, "No donations found for this demo.");
-        uint256 donatorIndex = -1;
+        uint256 donatorIndex;
         bool isDonator = false;
         for (uint256 i = 0; i < donationListenerRecord[allVoting[_semisongID].demoID].length; i++) {
             if (donationListenerRecord[allVoting[_semisongID].demoID][i].listenerAddress == msg.sender) {
@@ -343,10 +364,20 @@ contract VibeStake {
 
         // Record the listener's previous donation (standing for vote amount)
         allVoting[_semisongID].hasVoted[msg.sender] = true;
-        donationAmount = donationListenerRecord[allVoting[_semisongID].demoID][donatorIndex].donationAmount;
+        uint256 donationAmount = donationListenerRecord[allVoting[_semisongID].demoID][donatorIndex].donationAmount;
         allVoting[_semisongID].totalVoteAmount += donationAmount;
+        emit songVotingUpdate(
+            _semisongID,
+            allSongsbeforeVoting[_semisongID].songName,
+            allSongsbeforeVoting[_semisongID].artistName,
+            allVoting[_semisongID].demoID,
+            donationAmount,
+            allVoting[_semisongID].totalVoteAmount * 100 / allVoting[_semisongID].totalDonationAmount
+        );
     }
-
+    
+    // Event for song voting result
+    event songVotingResult(uint256 semisongID, bool isApproved, uint256 votePercentage);
     // Function to finalize voting and move song to final list if approved
     function finalizeSongVoting(uint256 _semisongID) public {
         require(allSongsbeforeVoting[_semisongID].songID != 0, "Song does not exist in voting.");
@@ -358,7 +389,7 @@ contract VibeStake {
 
         // Move song to final songs
         songIDTracker += 1;
-        _songID = songIDTracker;
+        uint256 _songID = songIDTracker;
 
         Song memory finalSong = allSongsbeforeVoting[_semisongID];
         allSongs[songIDTracker] = finalSong;
@@ -370,16 +401,16 @@ contract VibeStake {
             // Distribute donations to artist 
             allSongs[_songID].artistAddress.transfer(totalDonationAmount);
             // Add stake info to the song
-            StakeInfo = new StakeInfo[](donationListenerRecord[allVoting[_semisongID].demoID].length);
+            StakeInfo[] memory stakeInfoArray = new StakeInfo[](donationListenerRecord[allVoting[_semisongID].demoID].length);
             for (uint256 i = 0; i < donationListenerRecord[allVoting[_semisongID].demoID].length; i++) {
-                StakeInfo[i] = StakeInfo({
+                stakeInfoArray[i] = StakeInfo({
                     StakeProportion: donationListenerRecord[allVoting[_semisongID].demoID][i].donationAmount * 100 / totalDonationAmount,
                     listenerAddress: donationListenerRecord[allVoting[_semisongID].demoID][i].listenerAddress
                 });
                 listenerOwnedSongs[donationListenerRecord[allVoting[_semisongID].demoID][i].listenerAddress].push(_songID);
 
             }
-            allSongs[songIDTracker].stakeInfo = StakeInfo;
+            allSongs[songIDTracker].stakeInfo = stakeInfoArray;
 
             emit songVotingResult(_songID, true, totalVoteAmount/totalDonationAmount);
         } else {
@@ -395,7 +426,15 @@ contract VibeStake {
         delete allSongsbeforeVoting[_semisongID];
         delete donationListenerRecord[allVoting[_semisongID].demoID];
         
-        artistToSemiSongs[allSongsbeforeVoting[_semisongID].artistID].remove(_semisongID);
+        // Remove the song from the artistToSemiSongs mapping
+        uint256[] storage semiSongs = artistToSemiSongs[allSongsbeforeVoting[_semisongID].artistID];
+        for (uint256 i = 0; i < semiSongs.length; i++) {
+            if (semiSongs[i] == _semisongID) {
+                semiSongs[i] = semiSongs[semiSongs.length - 1];
+                semiSongs.pop();
+                break;
+            }
+        }
         artistToSongs[allSongsbeforeVoting[_semisongID].artistID].push(_songID);
     }        
 
@@ -408,14 +447,13 @@ contract VibeStake {
         string artistName,
         uint256 platformID,
         string platformName,
-        uint256 purchaseAmount,
+        uint256 purchaseAmount, // msg.value
         uint256 purchaseDays);
 
-    function purchaseSong(
+    function purchaseSong (
         uint256 _songID,
         uint256 _platformID,
-        uint256 _purchaseAmount,
-        uint256 _purchaseDays) public {
+        uint256 _purchaseDays) public payable{
         require(identifyUser[msg.sender] == UserType.PLATFORM, "Not a platform.");
         require(allSongs[_songID].songID != 0, "Song does not exist.");
         require(allPlatforms[msg.sender].platformID == _platformID, "Not the owner of the platform.");
@@ -494,3 +532,5 @@ contract VibeStake {
             allPlatforms[msg.sender].name
         );
     }
+
+}
