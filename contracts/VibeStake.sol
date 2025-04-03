@@ -9,6 +9,7 @@ contract VibeStake {
     uint256 demoIDTracker;
     uint256 songIDTracker;
     uint256 semiSongIDTracker; // for the song before voting
+    uint256 commission_fee = 10; // 10% commission fee for the DApp platform
 
     constructor() {
         // Initialize the ID trackers
@@ -109,6 +110,10 @@ contract VibeStake {
 
     // mapping for platform and his music
     mapping(uint256 => uint256[]) public platformToSongs; // platformID -> songIDs
+
+    // mapping for user and his profit including artist and listener
+    mapping(address => uint256) public userProfit; // user address => profit amount
+
 
     // extra mappings for intellectual property protection
     mapping(uint256 => uint256) timesSongPublished;
@@ -219,7 +224,7 @@ contract VibeStake {
 
         for (uint256 i = 0; i < donationListenerRecord[_demoID].length; i++) {
             if (donationListenerRecord[_demoID][i].listenerAddress == msg.sender) {
-                donationListenerRecord[_demoID][i].listenerAddress.transfer(donationListenerRecord[_demoID][i].donationAmount);
+                donationListenerRecord[_demoID][i].listenerAddress.transfer(donationListenerRecord[_demoID][i].donationAmount* (100-commission_fee) / 100);
                 delete donationListenerRecord[_demoID][i];
             }
         }
@@ -363,8 +368,11 @@ contract VibeStake {
         // Voting passed 
         if (totalVoteAmount >= requiredDonationAmount) {
 
-            // Distribute donations to artist 
-            allSongs[_songID].artistAddress.transfer(totalDonationAmount);
+            // Distribute 90% donations to artist 
+            allSongs[_songID].artistAddress.transfer(totalDonationAmount * (100-commission_fee) / 100);
+            userProfit[allSongs[_songID].artistAddress] += totalDonationAmount * (100-commission_fee) / 100;
+            
+            
             // Add stake info to the song
             StakeInfo[] memory stakeInfoArray = new StakeInfo[](donationListenerRecord[allVoting[_semisongID].demoID].length);
             for (uint256 i = 0; i < donationListenerRecord[allVoting[_semisongID].demoID].length; i++) {
@@ -382,7 +390,7 @@ contract VibeStake {
             // Voting failed, refund donations to listeners
             // No stake info will be added to the song
             for (uint256 i = 0; i < donationListenerRecord[_songID].length; i++) {
-                donationListenerRecord[_songID][i].listenerAddress.transfer(donationListenerRecord[_songID][i].donationAmount);
+                donationListenerRecord[_songID][i].listenerAddress.transfer(donationListenerRecord[_songID][i].donationAmount* (100-commission_fee) / 100);
             }            
             emit songVotingResult(_songID, false, totalVoteAmount/totalDonationAmount);
         }
@@ -430,10 +438,11 @@ contract VibeStake {
         // add the platform to the song
         allSongs[_songID].platformAuthorized.push(_platformID);
 
-        // calculate the shares owned by the listener, and the default is 90% to the artist and 10% to the listener
+        // calculate the shares owned by the listener, and the default is 80% to the artist and 10% to the listener, 10% to the platform
         if (allSongs[_songID].stakeInfo.length == 0) {
             // if there is no stake info, the song is not published yet, so the artist will get 100% of the purchase amount
-            allSongs[_songID].artistAddress.transfer(msg.value);
+            allSongs[_songID].artistAddress.transfer(msg.value* (100-commission_fee) / 100);
+            userProfit[allSongs[_songID].artistAddress] += msg.value* (100-commission_fee) / 100;
             emit platformPurchase(
                 _songID,
                 allSongs[_songID].songName,
@@ -445,15 +454,17 @@ contract VibeStake {
             );
             return;
         }
-        uint256 artistShare = msg.value * 90 / 100;
+        uint256 artistShare = msg.value * (100-commission_fee-10) / 100;
         uint256 listenerShare = msg.value * 10 / 100;
         // transfer the purchase amount to the artist
         allSongs[_songID].artistAddress.transfer(artistShare);
+        userProfit[allSongs[_songID].artistAddress] += artistShare;
 
         // transfer the listener share to the listener according to their donation amount
         for (uint256 i = 0; i < allSongs[_songID].stakeInfo.length; i++) {
             uint256 listenerShareAmount = listenerShare * allSongs[_songID].stakeInfo[i].StakeProportion / 100;
             allSongs[_songID].stakeInfo[i].listenerAddress.transfer(listenerShareAmount);
+            userProfit[allSongs[_songID].stakeInfo[i].listenerAddress] += listenerShareAmount;
         }
         
         
@@ -648,6 +659,13 @@ contract VibeStake {
             revert("User type not recognized.");
         }
     }
+    // get profit of the user
+    function getMyProfit() public view returns (uint256) {
+        require(identifyUser[msg.sender] != UserType.UNDEFINED, "User not registered.");
+        require(userProfit[msg.sender] > 0, "No profit available.");
+        return userProfit[msg.sender];
+    }
+
 
     // get info while in the donation period
     function getDemoDonationDetails(uint256 _demoID) public view returns (
