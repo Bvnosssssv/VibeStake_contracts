@@ -41,6 +41,7 @@ contract VibeStake {
     struct Platform {
         string name;
         uint256 platformID;
+        address platformAddress;
     }
 
     struct Demo {
@@ -79,64 +80,43 @@ contract VibeStake {
 
     struct Voting {
         uint256 demoID;
-        uint256 totalDonationAmount; // total donation amount for the demo
+        uint256 totalDonationAmount; // total donated amount for the demo
         uint256 totalVoteAmount; // total voted amount (the voting power depends on their previous donation) for the semi-final song
         uint256 votingEndTime; // voting end time
         mapping(address => bool) hasVoted; // listener address => voted or not
     }
 
-    mapping(address => UserType) public identifyUser;
+    mapping(address => UserType) public identifyUser; // user address => user type(ARTIST, LISTENER, PLATFORM)
 
     mapping(address => Artist) allArtists;
     mapping(address => Listener) allListeners;
     mapping(address => Platform) allPlatforms;
-    mapping(uint256 => Song) allSongs;
     mapping(uint256 => Demo) allDemos;
     mapping(uint256 => Voting) allVoting; 
     mapping(uint256 => Song) allSongsbeforeVoting; // Temporary storage for songs before voting
-    mapping(address => uint256[]) public listenerOwnedSongs;
-    mapping(uint256 => uint256[]) public artistToDemos;
+    mapping(uint256 => Song) allSongs;
 
     mapping(string => bool) musicHashUsed; // including song hash and demo hash
-    
-    mapping(uint256 => uint256[]) public artistToSongs; // artistID -> songIDs
+
+    // mapping for artist and his music    
+    mapping(uint256 => uint256[]) public artistToDemos;
     mapping(uint256 => uint256[]) public artistToSemiSongs; // artistID -> songIDs before voting
+    mapping(uint256 => uint256[]) public artistToSongs; // artistID -> songIDs
+
+    // mapping for listener and his music
     mapping(uint256 => Donation[]) donationListenerRecord; // demoId => list of donations
+    mapping(address => uint256[]) public listenerOwnedSongs;
+
+    // mapping for platform and his music
     mapping(uint256 => uint256[]) public platformToSongs; // platformID -> songIDs
 
     // extra mappings for intellectual property protection
     mapping(uint256 => uint256) timesSongPublished;
     mapping(uint256 => uint256) timesDemoPublished;
 
-    function getDemosByArtist(uint256 _artistID) public view returns (uint256[] memory) {
-    return artistToDemos[_artistID];
-    }
-
-    function getDemoCount() public view returns (uint256) {
-        return demoIDTracker;
-    }
-
-
-    function getDemoDetails(uint256 _demoID) public view returns (
-        string memory,  // demoName
-        string memory,  // artistName
-        string memory,  // genre
-        uint256,        // DonationDays
-        string memory   // ipfsHash
-    ) {
-        require(allDemos[_demoID].demoID != 0, "Demo does not exist.");
-        Demo memory d = allDemos[_demoID];
-        return (d.demoName, d.artistName, d.genre, d.DonationDays, d.ipfsHash);
-    }
     
     function getUserType(address _user) public view returns (UserType) {
         return identifyUser[_user];
-    }
-    function getArtistDetails() public view returns (string memory, uint256, uint256[] memory) {
-    require(identifyUser[msg.sender] == UserType.ARTIST, "Not an artist.");
-    Artist memory artist = allArtists[msg.sender];
-    uint256[] memory songs = artistToSongs[artist.artistID];
-    return (artist.artistname, artist.artistID, songs);
     }
 
     function registerArtist(string memory _name) public {
@@ -158,24 +138,9 @@ contract VibeStake {
         require(identifyUser[msg.sender] == UserType.UNDEFINED, "User already registered.");
         platformIDTracker++;
         identifyUser[msg.sender] = UserType.PLATFORM;
-        allPlatforms[msg.sender] = Platform(_name, platformIDTracker);
+        allPlatforms[msg.sender] = Platform(_name, platformIDTracker, msg.sender);
     }
 
-    function getNumSongs() public view returns (uint256) {
-    return songIDTracker;
-}
-
-
-    function getListenerDetails() public view returns (
-    string memory,    // listener name
-    uint256,          // listener ID
-    uint256[] memory  // owned song IDs
-) {
-    require(identifyUser[msg.sender] == UserType.LISTENER, "Not a listener.");
-    Listener memory user = allListeners[msg.sender];
-    uint256[] memory purchasedSongs = listenerOwnedSongs[msg.sender];
-    return (user.name, user.listenerID, purchasedSongs);
-}
 
     // create demo
     event demoAdded(
@@ -532,5 +497,196 @@ contract VibeStake {
             allPlatforms[msg.sender].name
         );
     }
+    
+    // accessibility: public
+    // get general info of the smart contract
+    function getHistoryNumArtists() public view returns (uint256) {
+        return artistIDTracker;
+    }
+    function getHistoryNumListeners() public view returns (uint256) {
+        return listenerIDTracker;
+    }
+    function getHistoryNumPlatforms() public view returns (uint256) {
+        return platformIDTracker;
+    }
+    function getHistoryNumDemos() public view returns (uint256) {
+        return demoIDTracker;
+    }
+    function getHistoryNumSongs() public view returns (uint256) {
+        return songIDTracker;
+    }
+
+    // get simple list of artists/platforms/demos/songs
+    function getListArtists() public view returns (string[] memory, uint256[] memory) {
+        uint256 totalArtists = artistIDTracker;
+        string[] memory artistNames = new string[](totalArtists);
+        uint256[] memory artistIDs = new uint256[](totalArtists);
+
+        uint256 index = 0;
+        for (uint256 i = 1; i <= totalArtists; i++) {
+            address artistAddress = allArtists[address(uint160(i))].artistAddress;
+            if (artistAddress != address(0)) {
+                artistNames[index] = allArtists[artistAddress].artistname;
+                artistIDs[index] = allArtists[artistAddress].artistID;
+                index++;
+            }
+        }
+
+        return (artistNames, artistIDs);
+    }
+    function getListPlatforms() public view returns (string[] memory, uint256[] memory) {
+        uint256 totalPlatforms = platformIDTracker;
+        string[] memory platformNames = new string[](totalPlatforms);
+        uint256[] memory platformIDs = new uint256[](totalPlatforms);
+
+        uint256 index = 0;
+        for (uint256 i = 1; i <= totalPlatforms; i++) {
+            address platformAddress = allPlatforms[address(uint160(i))].platformAddress;
+            if (platformAddress != address(0)) {
+                platformNames[index] = allPlatforms[platformAddress].name;
+                platformIDs[index] = allPlatforms[platformAddress].platformID;
+                index++;
+            }
+        }
+        
+        return (platformNames, platformIDs);
+    }
+    function getListDemos() public view returns (string[] memory, uint256[] memory) {
+        uint256 totalDemos = demoIDTracker;
+        string[] memory demoNames = new string[](totalDemos);
+        uint256[] memory demoIDs = new uint256[](totalDemos);
+
+        uint256 index = 0;
+        for (uint256 i = 1; i <= totalDemos; i++) {
+            if (allDemos[i].demoID != 0) {
+                demoNames[index] = allDemos[i].demoName;
+                demoIDs[index] = allDemos[i].demoID;
+                index++;
+            }
+        }
+
+        return (demoNames, demoIDs);
+    }
+    function getListSongs() public view returns (string[] memory, uint256[] memory) {
+        uint256 totalSongs = songIDTracker;
+        string[] memory songNames = new string[](totalSongs);
+        uint256[] memory songIDs = new uint256[](totalSongs);
+
+        uint256 index = 0;
+        for (uint256 i = 1; i <= totalSongs; i++) {
+            if (allSongs[i].songID != 0) {
+                songNames[index] = allSongs[i].songName;
+                songIDs[index] = allSongs[i].songID;
+                index++;
+            }
+        }
+
+        return (songNames, songIDs);
+    }
+
+    // get details of artist/platform/demo/song
+    function getArtistDetails(uint256 _artistId) public view returns (string memory, uint256, uint256[] memory, uint256[] memory, uint256[] memory) {
+        require(identifyUser[msg.sender] == UserType.PLATFORM, "Not a platform.");
+        require(allArtists[address(uint160(_artistId))].artistID != 0, "Artist does not exist.");
+
+        Artist memory artist = allArtists[address(uint160(_artistId))];
+        uint256[] memory ownedDemos = artistToDemos[artist.artistID];
+        uint256[] memory ownedSemiSongs = artistToSemiSongs[artist.artistID];
+        uint256[] memory ownedSongs = artistToSongs[artist.artistID];
+
+        return (artist.artistname, artist.artistID, ownedDemos, ownedSemiSongs, ownedSongs);
+    }
+    function getPlatformDetails(uint256 _platformId) public view returns (string memory, uint256, uint256[] memory) {
+        require(allPlatforms[address(uint160(_platformId))].platformID != 0, "Platform does not exist.");
+
+        Platform memory platform = allPlatforms[address(uint160(_platformId))];
+        uint256[] memory ownedSongs = platformToSongs[platform.platformID];
+
+        return (platform.name, platform.platformID, ownedSongs);
+    }
+    function getDemoDetails(uint256 _demoID) public view returns (
+        string memory,  // demoName
+        string memory,  // artistName
+        string memory,  // genre
+        uint256,        // DonationDays
+        string memory   // ipfsHash
+    ) {
+        require(allDemos[_demoID].demoID != 0, "Demo does not exist.");
+        Demo memory d = allDemos[_demoID];
+        return (d.demoName, d.artistName, d.genre, d.DonationDays, d.ipfsHash);
+    }
+    function getSongDetails(uint256 _songID) public view returns (
+        string memory,  // songName
+        string memory,  // artistName
+        string memory,  // genre
+        uint256,        // price
+        string memory   // ipfsHash
+    ) {
+        require(allSongs[_songID].songID != 0, "Song does not exist.");
+        Song memory s = allSongs[_songID];
+        return (s.songName, s.artistName, s.genre, s.price, s.ipfsHash);
+    }
+
+    // Accessibility: user itself
+    // get information of user itself
+    function getMyDetails() public view returns (string memory, uint256, uint256[] memory) {
+        require(identifyUser[msg.sender] != UserType.UNDEFINED, "User not registered.");
+        if (identifyUser[msg.sender] == UserType.ARTIST) {
+            Artist memory user = allArtists[msg.sender];
+            uint256[] memory ownedSongs = artistToSongs[user.artistID];
+            return (user.artistname, user.artistID, ownedSongs);
+        } else if (identifyUser[msg.sender] == UserType.PLATFORM) {
+            Platform memory user = allPlatforms[msg.sender];
+            uint256[] memory ownedSongs = platformToSongs[user.platformID];
+            return (user.name, user.platformID, ownedSongs);
+        } else if (identifyUser[msg.sender] == UserType.LISTENER) {
+            Listener memory user = allListeners[msg.sender];
+            uint256[] memory purchasedSongs = listenerOwnedSongs[msg.sender];
+            return (user.name, user.listenerID, purchasedSongs);
+        }
+        else {
+            revert("User type not recognized.");
+        }
+    }
+
+    // get info while in the donation period
+    function getDemoDonationDetails(uint256 _demoID) public view returns (
+        string memory,  // demoName
+        string memory,  // artistName
+        uint256,        // DonationEndDay
+        uint256,        // donationAmount
+        string memory   // ipfsHash
+    ) {
+        require(allDemos[_demoID].demoID != 0, "Demo does not exist.");
+        require(allDemos[_demoID].finalSongPublished == false, "The song has been published.");
+        Demo memory d = allDemos[_demoID];
+        uint256 totalDonationAmount = 0;
+        for (uint256 i = 0; i < donationListenerRecord[_demoID].length; i++) {
+            totalDonationAmount += donationListenerRecord[_demoID][i].donationAmount;
+        }
+        uint256 donationEndTime = timesDemoPublished[_demoID] + d.DonationDays * 1 days;
+        return (d.demoName, d.artistName, donationEndTime, totalDonationAmount, d.ipfsHash);
+    }
+
+    // get info while in the voting period
+    function getSongVotingDetails(uint256 _semisongID) public view returns (
+        string memory,  // songName
+        string memory,  // artistName
+        uint256,        // totalVoteAmount
+        uint256,        // votingPercentage
+        uint256         // votingEndTime
+    ) {
+        require(allSongsbeforeVoting[_semisongID].songID != 0, "Song does not exist.");
+        
+        string memory songName = allSongsbeforeVoting[_semisongID].songName;
+        string memory artistName = allSongsbeforeVoting[_semisongID].artistName;
+        uint256 totalVoteAmount = allVoting[_semisongID].totalVoteAmount;
+        uint256 totalDonationAmount = allVoting[_semisongID].totalDonationAmount;
+        uint256 votingPercentage = totalVoteAmount * 100 / totalDonationAmount;
+        uint256 votingEndTime = allVoting[_semisongID].votingEndTime;
+        return (songName, artistName, totalVoteAmount, votingPercentage, votingEndTime);
+    }
+
+
 
 }
