@@ -29,7 +29,7 @@ contract VibeStake {
     }
     
     struct Artist {
-        string artistname;
+        string artistName;
         uint256 artistID;
         address payable artistAddress;
     }
@@ -43,12 +43,12 @@ contract VibeStake {
         string name;
         uint256 platformID;
         address platformAddress;
+        uint256 copyRightPayment; 
     }
 
     struct Demo {
         string demoName;
-        string artistName;
-        uint256 artistID;
+        address artistAddress; // artist address
         string genre;
         uint256 demoID;
         uint256 DonationDays; // promise final song will be published within this time
@@ -58,15 +58,17 @@ contract VibeStake {
 
     struct Song {
         string songName;
-        string artistName;
-        uint256 artistID;
         string genre;
         uint256 songID;
         address payable artistAddress;
         uint256 [] platformAuthorized; // platformID 
         string ipfsHash; // IPFS address for storing song
         uint256 price; // price for the song / per day, unit is wei(1 ether = 10^18 wei) 
-        StakeInfo[] stakeInfo; 
+    }
+
+    struct StakeInfo{
+        uint256 StakeProportion; // 0-100
+        address payable listenerAddress;
     }
 
     struct Donation {
@@ -74,11 +76,7 @@ contract VibeStake {
         uint256 donationAmount;
         address payable listenerAddress;
     }
-    struct StakeInfo{
-        uint256 StakeProportion; // 0-100
-        address payable listenerAddress;
-    }
-
+    
     struct Voting {
         uint256 demoID;
         uint256 totalDonationAmount; // total donated amount for the demo
@@ -87,7 +85,19 @@ contract VibeStake {
         mapping(address => bool) hasVoted; // listener address => voted or not
     }
 
+    struct Ownership {
+        uint256 songID;
+        uint256 expirTime; // expiration time of the song
+    }
+
     mapping(address => UserType) public identifyUser; // user address => user type(ARTIST, LISTENER, PLATFORM)
+
+    address[] public artistsList; // list of artists
+    address[] public listenersList; // list of listeners
+    address[] public platformsList; // list of platforms
+    mapping(uint256 => address) public artistIDToAddress; // artist ID => artist address
+    mapping(uint256 => address) public listenerIDToAddress; // listener ID => listener address
+    mapping(uint256 => address) public platformIDToAddress; // platform ID => platform address
 
     mapping(address => Artist) allArtists;
     mapping(address => Listener) allListeners;
@@ -109,11 +119,13 @@ contract VibeStake {
     mapping(address => uint256[]) public listenerOwnedSongs;
 
     // mapping for platform and his music
-    mapping(uint256 => uint256[]) public platformToSongs; // platformID -> songIDs
+    mapping(uint256 => Ownership[]) public platformToSongs; // platformID -> (songID, expiration time)
 
     // mapping for user and his profit including artist and listener
     mapping(address => uint256) public userProfit; // user address => profit amount
 
+    // mapping for song and his stake info
+    mapping (uint256 => StakeInfo[]) public songToStakeInfo;
 
     // extra mappings for intellectual property protection
     mapping(uint256 => uint256) timesSongPublished;
@@ -130,6 +142,8 @@ contract VibeStake {
         artistIDTracker++;
         identifyUser[msg.sender] = UserType.ARTIST;
         allArtists[msg.sender] = Artist(_name, artistIDTracker, payable(msg.sender));
+        artistsList.push(msg.sender); // Add the artist to the list of artists
+        artistIDToAddress[artistIDTracker] = msg.sender; // Map artist ID to address
     }
 
     function registerListener(string memory _name) public {
@@ -137,13 +151,17 @@ contract VibeStake {
         listenerIDTracker++;
         identifyUser[msg.sender] = UserType.LISTENER;
         allListeners[msg.sender] = Listener(_name, listenerIDTracker);
+        listenersList.push(msg.sender); // Add the listener to the list of listeners
+        listenerIDToAddress[listenerIDTracker] = msg.sender; // Map listener ID to address
     }
 
     function registerPlatform(string memory _name) public {
         require(identifyUser[msg.sender] == UserType.UNDEFINED, "User already registered.");
         platformIDTracker++;
         identifyUser[msg.sender] = UserType.PLATFORM;
-        allPlatforms[msg.sender] = Platform(_name, platformIDTracker, msg.sender);
+        allPlatforms[msg.sender] = Platform(_name, platformIDTracker, msg.sender, 0);
+        platformsList.push(msg.sender); // Add the platform to the list of platforms
+        platformIDToAddress[platformIDTracker] = msg.sender; // Map platform ID to address
     }
 
 
@@ -166,11 +184,9 @@ contract VibeStake {
         demoIDTracker += 1;
         Demo memory newDemo;
         newDemo.demoName = _demoname;
-        newDemo.artistName = allArtists[msg.sender].artistname;
-        newDemo.artistID = allArtists[msg.sender].artistID;
+        newDemo.artistAddress = msg.sender;
         newDemo.genre = _genre;
         newDemo.demoID = demoIDTracker;
-        newDemo.artistName = allArtists[msg.sender].artistname;
         newDemo.DonationDays = _donationdays;
         newDemo.ipfsHash = _ipfshash;
         newDemo.finalSongPublished = false; // Initialize to false
@@ -182,7 +198,7 @@ contract VibeStake {
         emit demoAdded(
             demoIDTracker,
             _demoname,
-            allArtists[msg.sender].artistname,
+            allArtists[msg.sender].artistName,
             _donationdays,
             _ipfshash
         );
@@ -216,7 +232,8 @@ contract VibeStake {
     }
     
     // return money to the listener if the song is not published after the donation days
-    // but the function can only be called after the donation days and should be called by the listener
+    // but the function can only be called before the song is published
+    // the donation will be returned to the listener according to their donation amount but the commission fee will be deducted
     function returnDonation(uint256 _demoID) public {
         require(identifyUser[msg.sender] == UserType.LISTENER, "Not a listener.");
         require(allDemos[_demoID].demoID != 0, "Demo does not exist."); // if song published, the demo will be deleted
@@ -232,12 +249,62 @@ contract VibeStake {
 
 
 // Logic for Voting
-// before the song is added, the song is stored in allsongsbeforevoting temporarily, and should be voted by the listener
+// before the song is added, the song is stored in allsongsbeforevoting temporarily, and should be voted by the donators
 // the voting will be passed if the donation amount is greater than 50% of the total donation amount
 // if passed, the song will be added and the donation will be distributed to the artist
 // if not passed, the donation will be returned to the listener and the demo will not be deleted, 
 // and there will no be any stakeinfo for the song
-    
+
+    // if no donation, the song will be published directly
+    event SongPublished(
+        uint256 demoID,
+        uint256 songID,
+        string artistName,
+        string songName,
+        string genre,
+        string ipfshash
+    );
+    function publishSong(uint256 _demoID,
+        string memory _songName,
+        string memory _genre,
+        string memory _ipfshash
+        ) public {
+        require(identifyUser[msg.sender] == UserType.ARTIST, "Not an artist.");
+        require(allDemos[_demoID].demoID != 0, "Demo does not exist.");
+        require(allDemos[_demoID].artistAddress == msg.sender, "Not the owner of the demo.");
+        require(allDemos[_demoID].finalSongPublished == false, "The song has been published.");
+        require(donationListenerRecord[_demoID].length == 0, "The song should be voted before publishing.");
+
+        songIDTracker += 1;
+        allDemos[_demoID].finalSongPublished = true; // Mark the demo as final song published
+
+        Song memory newSong;
+        newSong.songName = _songName;
+        newSong.genre = _genre;
+        newSong.songID = songIDTracker;
+        newSong.artistAddress = allArtists[msg.sender].artistAddress;
+        newSong.ipfsHash = _ipfshash;
+        newSong.price = 0; // Set initial price to 0, can be updated later
+        newSong.platformAuthorized = new uint256[](0); // Initialize empty array for authorized platforms
+        
+        allSongs[songIDTracker] = newSong;
+
+        musicHashUsed[_ipfshash] = true;
+        artistToSongs[allArtists[msg.sender].artistID].push(songIDTracker);
+        timesSongPublished[songIDTracker] = block.timestamp; // Store the time when the song is published
+
+        emit SongPublished(
+            _demoID,
+            songIDTracker,
+            allArtists[msg.sender].artistName,
+            _songName,
+            _genre,
+            _ipfshash
+        );
+    }
+
+
+
     event SongSubmitted(
         uint256 demoID,
         uint256 semiSongID,
@@ -247,7 +314,7 @@ contract VibeStake {
         string ipfshash
     );
     // if donation amount is 0, the song do not need to be voted so that it can skip this process
-    function SongSubmittedForVoting(
+    function submitSongsForVoting(
         uint256 _demoID,
         string memory _songName,
         string memory _genre,
@@ -256,7 +323,7 @@ contract VibeStake {
         require(identifyUser[msg.sender] == UserType.ARTIST, "Not an artist.");
         require(allDemos[_demoID].demoID != 0, "Demo does not exist.");
         require(!musicHashUsed[_ipfshash], "Duplicate hash has been detected.");
-        require(allDemos[_demoID].artistID == allArtists[msg.sender].artistID, "Not the owner of the demo.");
+        require(allDemos[_demoID].artistAddress == msg.sender, "Not the owner of the demo.");
         require(donationListenerRecord[_demoID].length > 0, "No donations found for this demo.");
 
 
@@ -266,8 +333,6 @@ contract VibeStake {
 
         Song memory newSong;
         newSong.songName = _songName;
-        newSong.artistName = allArtists[msg.sender].artistname;
-        newSong.artistID = allArtists[msg.sender].artistID;
         newSong.genre = _genre;
         newSong.songID = semiSongIDTracker;
         newSong.artistAddress = allArtists[msg.sender].artistAddress;
@@ -296,7 +361,7 @@ contract VibeStake {
         emit SongSubmitted(
             _demoID,
             semiSongIDTracker,
-            allArtists[msg.sender].artistname,
+            allArtists[msg.sender].artistName,
             _songName,
             _genre,
             _ipfshash
@@ -339,7 +404,7 @@ contract VibeStake {
         emit songVotingUpdate(
             _semisongID,
             allSongsbeforeVoting[_semisongID].songName,
-            allSongsbeforeVoting[_semisongID].artistName,
+            allArtists[allSongsbeforeVoting[_semisongID].artistAddress].artistName,
             allVoting[_semisongID].demoID,
             donationAmount,
             allVoting[_semisongID].totalVoteAmount * 100 / allVoting[_semisongID].totalDonationAmount
@@ -374,16 +439,15 @@ contract VibeStake {
             
             
             // Add stake info to the song
-            StakeInfo[] memory stakeInfoArray = new StakeInfo[](donationListenerRecord[allVoting[_semisongID].demoID].length);
             for (uint256 i = 0; i < donationListenerRecord[allVoting[_semisongID].demoID].length; i++) {
-                stakeInfoArray[i] = StakeInfo({
+                songToStakeInfo[_songID].push(StakeInfo({
                     StakeProportion: donationListenerRecord[allVoting[_semisongID].demoID][i].donationAmount * 100 / totalDonationAmount,
                     listenerAddress: donationListenerRecord[allVoting[_semisongID].demoID][i].listenerAddress
-                });
+                }));
                 listenerOwnedSongs[donationListenerRecord[allVoting[_semisongID].demoID][i].listenerAddress].push(_songID);
 
             }
-            allSongs[songIDTracker].stakeInfo = stakeInfoArray;
+            
 
             emit songVotingResult(_songID, true, totalVoteAmount/totalDonationAmount);
         } else {
@@ -400,7 +464,8 @@ contract VibeStake {
         delete donationListenerRecord[allVoting[_semisongID].demoID];
         
         // Remove the song from the artistToSemiSongs mapping
-        uint256[] storage semiSongs = artistToSemiSongs[allSongsbeforeVoting[_semisongID].artistID];
+        uint256 _artistID = allArtists[allSongsbeforeVoting[_semisongID].artistAddress].artistID;
+        uint256[] storage semiSongs = artistToSemiSongs[_artistID];
         for (uint256 i = 0; i < semiSongs.length; i++) {
             if (semiSongs[i] == _semisongID) {
                 semiSongs[i] = semiSongs[semiSongs.length - 1];
@@ -408,7 +473,7 @@ contract VibeStake {
                 break;
             }
         }
-        artistToSongs[allSongsbeforeVoting[_semisongID].artistID].push(_songID);
+        artistToSongs[_artistID].push(_songID);
     }        
 
 // End of Voting Logic    
@@ -425,28 +490,42 @@ contract VibeStake {
 
     function purchaseSong (
         uint256 _songID,
-        uint256 _platformID,
         uint256 _purchaseDays) public payable{
         require(identifyUser[msg.sender] == UserType.PLATFORM, "Not a platform.");
         require(allSongs[_songID].songID != 0, "Song does not exist.");
-        require(allPlatforms[msg.sender].platformID == _platformID, "Not the owner of the platform.");
         require(msg.value > allSongs[_songID].price * _purchaseDays, "Purchase amount must be greater than the price.");
         require(_purchaseDays > 0, "Purchase days must be greater than 0.");
 
+        allPlatforms[msg.sender].copyRightPayment += msg.value * (100-commission_fee) / 100; // add the purchase amount to the platform's profit
+        
+        // if the platform has already purchased the song, the purchase amount will be added to the previous purchase amount
+        for (uint256 i = 0; i < allSongs[_songID].platformAuthorized.length; i++) {
+            if (allSongs[_songID].platformAuthorized[i] == allPlatforms[msg.sender].platformID) {
+                allSongs[_songID].price += msg.value * (100-commission_fee) / 100;
+                userProfit[allPlatforms[msg.sender].platformAddress] += msg.value * (100-commission_fee) / 100;
+                platformToSongs[allPlatforms[msg.sender].platformID][i].expirTime += _purchaseDays * 1 days; // Extend expiration time
+                return;
+            }
+        }
+
         // add the song to the platform
-        platformToSongs[_platformID].push(_songID);
+        uint256 _platformID = allPlatforms[msg.sender].platformID;
+        Ownership memory newOwnership;
+        newOwnership.songID = _songID;
+        newOwnership.expirTime = block.timestamp + _purchaseDays * 1 days; // Set expiration time
+        platformToSongs[_platformID].push(newOwnership);
         // add the platform to the song
         allSongs[_songID].platformAuthorized.push(_platformID);
 
         // calculate the shares owned by the listener, and the default is 80% to the artist and 10% to the listener, 10% to the platform
-        if (allSongs[_songID].stakeInfo.length == 0) {
+        if (songToStakeInfo[_songID].length == 0) {
             // if there is no stake info, the song is not published yet, so the artist will get 100% of the purchase amount
             allSongs[_songID].artistAddress.transfer(msg.value* (100-commission_fee) / 100);
             userProfit[allSongs[_songID].artistAddress] += msg.value* (100-commission_fee) / 100;
             emit platformPurchase(
                 _songID,
                 allSongs[_songID].songName,
-                allSongs[_songID].artistName,
+                allArtists[allSongs[_songID].artistAddress].artistName,
                 allPlatforms[msg.sender].platformID,
                 allPlatforms[msg.sender].name,
                 msg.value,
@@ -461,17 +540,17 @@ contract VibeStake {
         userProfit[allSongs[_songID].artistAddress] += artistShare;
 
         // transfer the listener share to the listener according to their donation amount
-        for (uint256 i = 0; i < allSongs[_songID].stakeInfo.length; i++) {
-            uint256 listenerShareAmount = listenerShare * allSongs[_songID].stakeInfo[i].StakeProportion / 100;
-            allSongs[_songID].stakeInfo[i].listenerAddress.transfer(listenerShareAmount);
-            userProfit[allSongs[_songID].stakeInfo[i].listenerAddress] += listenerShareAmount;
+        for (uint256 i = 0; i < songToStakeInfo[_songID].length; i++) {
+            uint256 listenerShareAmount = listenerShare * songToStakeInfo[_songID][i].StakeProportion / 100;
+            songToStakeInfo[_songID][i].listenerAddress.transfer(listenerShareAmount);
+            userProfit[songToStakeInfo[_songID][i].listenerAddress] += listenerShareAmount;
         }
         
         
         emit platformPurchase(
             _songID,
             allSongs[_songID].songName,
-            allSongs[_songID].artistName,
+            allArtists[allSongs[_songID].artistAddress].artistName,
             allPlatforms[msg.sender].platformID,
             allPlatforms[msg.sender].name,
             msg.value,
@@ -493,17 +572,26 @@ contract VibeStake {
         require(identifyUser[msg.sender] == UserType.ARTIST || identifyUser[msg.sender] == UserType.PLATFORM, "Not an artist or platform.");
         require(allSongs[_songID].songID != 0, "Song does not exist.");
         require(allPlatforms[msg.sender].platformID == _platformID, "Not the owner of the platform.");
+        require(allSongs[_songID].platformAuthorized.length > 0, "No platform authorized.");
+        require(block.timestamp > platformToSongs[_platformID][0].expirTime, "The song is still authorized.");
 
         for (uint256 i = 0; i < allSongs[_songID].platformAuthorized.length; i++) {
             if (allSongs[_songID].platformAuthorized[i] == _platformID) {
                 delete allSongs[_songID].platformAuthorized[i];
             }
         }
+        // Remove the song from the platform's ownership list
+        for (uint256 i = 0; i < platformToSongs[_platformID].length; i++) {
+            if (platformToSongs[_platformID][i].songID == _songID) {
+                delete platformToSongs[_platformID][i];
+            }
+        }
+
 
         emit platformUnauthorize(
             _songID,
             allSongs[_songID].songName,
-            allSongs[_songID].artistName,
+            allArtists[allSongs[_songID].artistAddress].artistName,
             _platformID,
             allPlatforms[msg.sender].name
         );
@@ -534,13 +622,11 @@ contract VibeStake {
         uint256[] memory artistIDs = new uint256[](totalArtists);
 
         uint256 index = 0;
-        for (uint256 i = 1; i <= totalArtists; i++) {
-            address artistAddress = allArtists[address(uint160(i))].artistAddress;
-            if (artistAddress != address(0)) {
-                artistNames[index] = allArtists[artistAddress].artistname;
-                artistIDs[index] = allArtists[artistAddress].artistID;
-                index++;
-            }
+        for (uint256 i = 0; i < artistsList.length; i++) {
+            address artistAddress = artistsList[i];
+            artistNames[index] = allArtists[artistAddress].artistName;
+            artistIDs[index] = allArtists[artistAddress].artistID;
+            index++;
         }
 
         return (artistNames, artistIDs);
@@ -551,13 +637,11 @@ contract VibeStake {
         uint256[] memory platformIDs = new uint256[](totalPlatforms);
 
         uint256 index = 0;
-        for (uint256 i = 1; i <= totalPlatforms; i++) {
-            address platformAddress = allPlatforms[address(uint160(i))].platformAddress;
-            if (platformAddress != address(0)) {
-                platformNames[index] = allPlatforms[platformAddress].name;
-                platformIDs[index] = allPlatforms[platformAddress].platformID;
-                index++;
-            }
+        for (uint256 i = 0; i < platformsList.length; i++) {
+            address platformAddress = platformsList[i];
+            platformNames[index] = allPlatforms[platformAddress].name;
+            platformIDs[index] = allPlatforms[platformAddress].platformID;
+            index++;
         }
         
         return (platformNames, platformIDs);
@@ -595,25 +679,49 @@ contract VibeStake {
         return (songNames, songIDs);
     }
 
-    // get details of artist/platform/demo/song
+    // get details of listener/artist/platform/demo/song
+    // accessibility: private
+    function getListenerDetails(uint256 _listenerId) public view returns (string memory, uint256, uint256[] memory) {
+        require(msg.sender == listenerIDToAddress[_listenerId], "Not the owner of the listener ID.");
+
+        Listener memory listener = allListeners[listenerIDToAddress[_listenerId]];
+        uint256[] memory purchasedSongs = listenerOwnedSongs[listenerIDToAddress[_listenerId]];
+
+        return (listener.name, listener.listenerID, purchasedSongs);
+    }
+    // accessibility: public
     function getArtistDetails(uint256 _artistId) public view returns (string memory, uint256, uint256[] memory, uint256[] memory, uint256[] memory) {
         require(identifyUser[msg.sender] == UserType.PLATFORM, "Not a platform.");
-        require(allArtists[address(uint160(_artistId))].artistID != 0, "Artist does not exist.");
+        require(allArtists[artistIDToAddress[_artistId]].artistID != 0, "Artist does not exist.");
 
-        Artist memory artist = allArtists[address(uint160(_artistId))];
+        Artist memory artist = allArtists[artistIDToAddress[_artistId]];
         uint256[] memory ownedDemos = artistToDemos[artist.artistID];
         uint256[] memory ownedSemiSongs = artistToSemiSongs[artist.artistID];
         uint256[] memory ownedSongs = artistToSongs[artist.artistID];
 
-        return (artist.artistname, artist.artistID, ownedDemos, ownedSemiSongs, ownedSongs);
+        return (artist.artistName, artist.artistID, ownedDemos, ownedSemiSongs, ownedSongs);
     }
-    function getPlatformDetails(uint256 _platformId) public view returns (string memory, uint256, uint256[] memory) {
-        require(allPlatforms[address(uint160(_platformId))].platformID != 0, "Platform does not exist.");
+    function getPlatformDetails(uint256 _platformId) public view returns (
+        string memory, 
+        uint256, 
+        uint256[] memory, 
+        uint256[] memory,
+        uint256) {
+        require(allPlatforms[platformIDToAddress[_platformId]].platformID != 0, "Platform does not exist.");
 
-        Platform memory platform = allPlatforms[address(uint160(_platformId))];
-        uint256[] memory ownedSongs = platformToSongs[platform.platformID];
+        Platform memory platform = allPlatforms[platformIDToAddress[_platformId]];
+        Ownership[] memory allOwnership = platformToSongs[platform.platformID];
+        uint256[] memory songsOwned = new uint256[](allOwnership.length);
+        uint256[] memory expirTimes = new uint256[](allOwnership.length);
+        for (uint256 i = 0; i < allOwnership.length; i++) {
+            songsOwned[i] = allOwnership[i].songID;
+            expirTimes[i] = allOwnership[i].expirTime;
+            
+        }
+    
+        return (platform.name, platform.platformID, songsOwned, expirTimes, platform.copyRightPayment);
+        
 
-        return (platform.name, platform.platformID, ownedSongs);
     }
     function getDemoDetails(uint256 _demoID) public view returns (
         string memory,  // demoName
@@ -624,7 +732,7 @@ contract VibeStake {
     ) {
         require(allDemos[_demoID].demoID != 0, "Demo does not exist.");
         Demo memory d = allDemos[_demoID];
-        return (d.demoName, d.artistName, d.genre, d.DonationDays, d.ipfsHash);
+        return (d.demoName, allArtists[d.artistAddress].artistName, d.genre, d.DonationDays, d.ipfsHash);
     }
     function getSongDetails(uint256 _songID) public view returns (
         string memory,  // songName
@@ -635,30 +743,10 @@ contract VibeStake {
     ) {
         require(allSongs[_songID].songID != 0, "Song does not exist.");
         Song memory s = allSongs[_songID];
-        return (s.songName, s.artistName, s.genre, s.price, s.ipfsHash);
+        return (s.songName, allArtists[s.artistAddress].artistName, s.genre, s.price, s.ipfsHash);
     }
 
     // Accessibility: user itself
-    // get information of user itself
-    function getMyDetails() public view returns (string memory, uint256, uint256[] memory) {
-        require(identifyUser[msg.sender] != UserType.UNDEFINED, "User not registered.");
-        if (identifyUser[msg.sender] == UserType.ARTIST) {
-            Artist memory user = allArtists[msg.sender];
-            uint256[] memory ownedSongs = artistToSongs[user.artistID];
-            return (user.artistname, user.artistID, ownedSongs);
-        } else if (identifyUser[msg.sender] == UserType.PLATFORM) {
-            Platform memory user = allPlatforms[msg.sender];
-            uint256[] memory ownedSongs = platformToSongs[user.platformID];
-            return (user.name, user.platformID, ownedSongs);
-        } else if (identifyUser[msg.sender] == UserType.LISTENER) {
-            Listener memory user = allListeners[msg.sender];
-            uint256[] memory purchasedSongs = listenerOwnedSongs[msg.sender];
-            return (user.name, user.listenerID, purchasedSongs);
-        }
-        else {
-            revert("User type not recognized.");
-        }
-    }
     // get profit of the user
     function getMyProfit() public view returns (uint256) {
         require(identifyUser[msg.sender] != UserType.UNDEFINED, "User not registered.");
@@ -671,7 +759,7 @@ contract VibeStake {
     function getDemoDonationDetails(uint256 _demoID) public view returns (
         string memory,  // demoName
         string memory,  // artistName
-        uint256,        // DonationEndDay
+        uint256,        // DonationEndCountdown in hours
         uint256,        // donationAmount
         string memory   // ipfsHash
     ) {
@@ -682,8 +770,8 @@ contract VibeStake {
         for (uint256 i = 0; i < donationListenerRecord[_demoID].length; i++) {
             totalDonationAmount += donationListenerRecord[_demoID][i].donationAmount;
         }
-        uint256 donationEndTime = timesDemoPublished[_demoID] + d.DonationDays * 1 days;
-        return (d.demoName, d.artistName, donationEndTime, totalDonationAmount, d.ipfsHash);
+        uint256 donationEndTime = (timesDemoPublished[_demoID] + d.DonationDays * 1 days - block.timestamp) / 1 hours; // in hours
+        return (d.demoName, allArtists[d.artistAddress].artistName, donationEndTime, totalDonationAmount, d.ipfsHash);
     }
 
     // get info while in the voting period
@@ -697,7 +785,7 @@ contract VibeStake {
         require(allSongsbeforeVoting[_semisongID].songID != 0, "Song does not exist.");
         
         string memory songName = allSongsbeforeVoting[_semisongID].songName;
-        string memory artistName = allSongsbeforeVoting[_semisongID].artistName;
+        string memory artistName = allArtists[allSongsbeforeVoting[_semisongID].artistAddress].artistName;
         uint256 totalVoteAmount = allVoting[_semisongID].totalVoteAmount;
         uint256 totalDonationAmount = allVoting[_semisongID].totalDonationAmount;
         uint256 votingPercentage = totalVoteAmount * 100 / totalDonationAmount;
