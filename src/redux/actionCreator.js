@@ -1,3 +1,0 @@
-const addSong = (song) => ({
-  song,
-});
