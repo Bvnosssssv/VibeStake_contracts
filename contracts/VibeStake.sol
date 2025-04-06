@@ -107,7 +107,7 @@ contract VibeStake {
     mapping(uint256 => Song) allSongsbeforeVoting; // Temporary storage for songs before voting
     mapping(uint256 => Song) allSongs;
 
-    mapping(string => bool) musicHashUsed; // including song hash and demo hash
+    mapping(string => bool) musicHashUsed; // including demo hash
 
     // mapping for artist and his music    
     mapping(uint256 => uint256[]) public artistToDemos;
@@ -274,6 +274,7 @@ contract VibeStake {
         require(allDemos[_demoID].artistAddress == msg.sender, "Not the owner of the demo.");
         require(allDemos[_demoID].finalSongPublished == false, "The song has been published.");
         require(donationListenerRecord[_demoID].length == 0, "The song should be voted before publishing.");
+        require(!musicHashUsed[_ipfshash], "Duplicate hash has been detected.");
 
         songIDTracker += 1;
         allDemos[_demoID].finalSongPublished = true; // Mark the demo as final song published
@@ -691,7 +692,6 @@ contract VibeStake {
     }
     // accessibility: public
     function getArtistDetails(uint256 _artistId) public view returns (string memory, uint256, uint256[] memory, uint256[] memory, uint256[] memory) {
-        require(identifyUser[msg.sender] == UserType.PLATFORM, "Not a platform.");
         require(allArtists[artistIDToAddress[_artistId]].artistID != 0, "Artist does not exist.");
 
         Artist memory artist = allArtists[artistIDToAddress[_artistId]];
