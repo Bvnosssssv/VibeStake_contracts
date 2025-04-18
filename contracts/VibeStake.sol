@@ -43,7 +43,7 @@ contract VibeStake {
         string name;
         uint256 platformID;
         address platformAddress;
-        uint256 copyRightPayment; 
+        uint256 copyRightPayment; // Total amount paid by the platform to license songs.
     }
 
     struct Demo {
@@ -66,17 +66,14 @@ contract VibeStake {
         uint256 price; // price for the song / per day, unit is wei(1 ether = 10^18 wei) 
     }
 
-    struct StakeInfo{
-        uint256 StakeProportion; // 0-100
-        address payable listenerAddress;
-    }
-
+    // donation info for the demo
     struct Donation {
         uint256 DemoID;
         uint256 donationAmount;
         address payable listenerAddress;
     }
     
+    // voting info for the demo
     struct Voting {
         uint256 demoID;
         uint256 totalDonationAmount; // total donated amount for the demo
@@ -85,6 +82,13 @@ contract VibeStake {
         mapping(address => bool) hasVoted; // listener address => voted or not
     }
 
+    // stake info for the song
+    struct StakeInfo{
+        uint256 StakeProportion; // 0-100
+        address payable listenerAddress;
+    }
+
+    //ownership of the song by the platform
     struct Ownership {
         uint256 songID;
         uint256 expirTime; // expiration time of the song
